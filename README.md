@@ -14,6 +14,13 @@ npm start
 Open http://localhost:3000, create a room, and send the invite link to your friend.
 Both of you choose the same video file from your own computer.
 
+## Starting and staying in sync
+
+- Each person sees a status line: who is missing, who is loading or buffering, and when everyone is in sync.
+- Once everyone has chosen the file, press **Start together**. Anyone can press it. Everyone gets a 3-2-1 countdown and the movie starts for all at the same moment.
+- Anyone can also play, pause, or seek at any time and everyone follows.
+- **Fullscreen** (button or press F) keeps chat and the sync status on top of the video. Press Enter in fullscreen to type a message.
+
 ## How it works
 
 - The server keeps one shared clock per room: `playing`, `time`, and who is buffering.

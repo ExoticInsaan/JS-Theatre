@@ -34,6 +34,7 @@ function getRoom(code) {
       waiting: new Set(),
       members: new Map(), // socket.id -> { name, file }
       sharedUrl: null,
+      countdown: false,
     });
   }
   return rooms.get(code);
@@ -63,8 +64,24 @@ function snapshot(room) {
   };
 }
 
+// Per-person health, computed from what each client reports every few seconds.
+function statusOf(room, id, m) {
+  const r = m.report || {};
+  if (!r.hasSource) return 'nofile';
+  if (room.waiting.has(id)) return 'buffering';
+  if (!r.ready) return 'loading';
+  if (Math.abs(r.drift || 0) > 0.6) return 'syncing';
+  return 'synced';
+}
+
 function memberList(room) {
-  return [...room.members.entries()].map(([id, m]) => ({ id, name: m.name, file: m.file }));
+  return [...room.members.entries()].map(([id, m]) => ({
+    id,
+    name: m.name,
+    file: m.file,
+    status: statusOf(room, id, m),
+    drift: m.report ? Math.round((m.report.drift || 0) * 10) / 10 : 0,
+  }));
 }
 
 function broadcastState(room, by) {
@@ -116,6 +133,7 @@ io.on('connection', (socket) => {
     freeze(current);
     current.waiting.add(socket.id);
     broadcastState(current, socket.id);
+    io.to(current.code).emit('members', memberList(current));
   });
 
   socket.on('ready', () => {
@@ -123,6 +141,39 @@ io.on('connection', (socket) => {
     freeze(current);
     current.waiting.delete(socket.id);
     broadcastState(current, socket.id);
+    io.to(current.code).emit('members', memberList(current));
+  });
+
+  // Clients report readiness and drift; everyone sees the result.
+  socket.on('report', ({ hasSource, ready, drift }) => {
+    if (!current) return;
+    const m = current.members.get(socket.id);
+    if (!m) return;
+    const before = statusOf(current, socket.id, m);
+    m.report = { hasSource: !!hasSource, ready: !!ready, drift: Number(drift) || 0 };
+    if (statusOf(current, socket.id, m) !== before) {
+      io.to(current.code).emit('members', memberList(current));
+    }
+  });
+
+  // Anyone can start a shared countdown. Everyone is paused, sees 3-2-1,
+  // and the server starts playback for the whole room at the same moment.
+  socket.on('start', () => {
+    if (!current || current.countdown) return;
+    const room = current;
+    room.countdown = true;
+    freeze(room);
+    room.playing = false;
+    broadcastState(room, null);
+    io.to(room.code).emit('countdown', { seconds: 3, by: room.members.get(socket.id)?.name || 'Someone' });
+    setTimeout(() => {
+      room.countdown = false;
+      if (!rooms.has(room.code)) return;
+      freeze(room);
+      room.playing = true;
+      room.updatedAt = Date.now();
+      broadcastState(room, null);
+    }, 3000);
   });
 
   socket.on('file', (file) => {

@@ -9,6 +9,9 @@
     screen: $('screen'), video: $('video'), picker: $('picker'), file: $('file'),
     urlForm: $('url-form'), url: $('url'),
     banner: $('wait-banner'), resume: $('resume'), mismatch: $('mismatch'),
+    status: $('status'), statusText: $('status-text'), fsStatus: $('fs-status'), fsStatusText: $('fs-status-text'),
+    start: $('start'), fsToggle: $('fs-toggle'), fsBtn: $('fs-btn'), countdown: $('countdown'),
+    fsFeed: $('fs-feed'), fsForm: $('fs-form'), fsInput: $('fs-input'),
     members: $('members'), messages: $('messages'), chatForm: $('chat-form'), chatInput: $('chat-input'),
   };
   const video = el.video;
@@ -21,6 +24,9 @@
   let hasSource = false;
   let iAmBuffering = false;
   let objectUrl = null;
+  let lastDrift = 0;
+  let counting = false;
+  let cdTimer = null;
 
   // Flags that stop a remote update from echoing back to the server as if
   // the local user had pressed the button.
@@ -29,6 +35,58 @@
   function armExpect() {
     clearTimeout(expectTimer);
     expectTimer = setTimeout(() => { expect.play = expect.pause = false; expect.seeks = 0; }, 2500);
+  }
+
+
+  // ------------------------------------------------ status + health report
+  function report() {
+    socket.emit('report', {
+      hasSource,
+      ready: hasSource && video.readyState >= 3,
+      drift: lastDrift,
+    });
+  }
+
+  const STATE_TEXT = {
+    nofile: 'No video yet', loading: 'Loading', buffering: 'Buffering', syncing: 'Catching up', synced: 'In sync',
+  };
+
+  function updateStatus() {
+    const me = members.find((m) => m.id === myId);
+    const others = members.filter((m) => m.id !== myId);
+    let text, ok = false, canStart = false;
+
+    const first = (st) => members.find((m) => m.status === st);
+    if (counting) {
+      text = 'Starting...';
+    } else if (others.length === 0) {
+      text = 'Waiting for your friend to join. Send them the invite link.';
+    } else if (me && me.status === 'nofile') {
+      text = 'Choose your video file to get ready.';
+    } else if (first('nofile')) {
+      text = `Waiting for ${first('nofile').name} to choose the video.`;
+    } else if (first('loading')) {
+      const l = first('loading');
+      text = `${l.id === myId ? 'Your' : l.name + "'s"} video is still loading.`;
+    } else if (first('buffering')) {
+      text = `${first('buffering').id === myId ? 'You are' : first('buffering').name + ' is'} buffering.`;
+    } else if (first('syncing')) {
+      const s = first('syncing');
+      text = `${s.id === myId ? 'You are' : s.name + ' is'} catching up (${Math.abs(s.drift).toFixed(1)}s off).`;
+    } else {
+      ok = true;
+      canStart = true;
+      const names = others.map((m) => m.name).join(', ');
+      const notStarted = !lastState || (!lastState.intent && lastState.time < 1);
+      text = notStarted ? 'Everyone is ready. Press Start together.' : `In sync with ${names}.`;
+    }
+
+    [[el.status, el.statusText], [el.fsStatus, el.fsStatusText]].forEach(([box, label]) => {
+      label.textContent = text;
+      box.classList.toggle('ok', ok);
+      box.classList.toggle('warn', !ok);
+    });
+    el.start.disabled = !canStart || counting;
   }
 
   // ---------------------------------------------------------------- lobby
@@ -52,6 +110,7 @@
       el.roomCode.textContent = code;
       renderMembers();
       lastState = res.state;
+      updateStatus();
       if (res.sharedUrl) loadUrl(res.sharedUrl);
       addSystem('You joined the room.');
     });
@@ -86,6 +145,7 @@
     el.nowShowing.textContent = label;
     iAmBuffering = true;
     socket.emit('buffering');
+    report();
   }
 
   function loadFile(file) {
@@ -122,7 +182,7 @@
   el.screen.addEventListener('drop', (e) => loadFile(e.dataTransfer.files[0]));
 
   // Once the video is ready, catch up with whatever the room is doing.
-  video.addEventListener('loadedmetadata', () => { if (lastState) applyState(lastState, true); });
+  video.addEventListener('loadedmetadata', () => { if (lastState) applyState(lastState, true); report(); });
   video.addEventListener('error', () => {
     addSystem('This browser cannot play that file. MP4 (H.264) and WebM work best.');
     if (iAmBuffering) { iAmBuffering = false; socket.emit('ready'); }
@@ -153,6 +213,7 @@
     if (!iAmBuffering || video.readyState < 3) return;
     iAmBuffering = false;
     socket.emit('ready');
+    report();
   };
   video.addEventListener('canplay', markReady);
   video.addEventListener('playing', markReady);
@@ -197,16 +258,20 @@
   });
 
   socket.on('state', (s) => {
-    if (s.by === myId) { lastState = s; showWaiting(s); return; }
+    if (s.by === myId) { lastState = s; showWaiting(s); updateStatus(); return; }
     applyState(s);
+    updateStatus();
   });
 
   // Heartbeat: gently pull drifting players back in line.
   socket.on('tick', (s) => {
     lastState = s;
     showWaiting(s);
-    if (!hasSource || video.readyState < 3) return;
     const diff = s.time - video.currentTime;
+    lastDrift = hasSource && video.readyState >= 1 ? diff : 0;
+    report();
+    updateStatus();
+    if (!hasSource || video.readyState < 3) return;
     if (s.playing && !video.paused) {
       if (Math.abs(diff) > 0.8) {
         expect.seeks++; armExpect();
@@ -229,7 +294,7 @@
   });
 
   // ---------------------------------------------------------------- people
-  socket.on('members', (list) => { members = list; renderMembers(); });
+  socket.on('members', (list) => { members = list; renderMembers(); updateStatus(); });
 
   function fmtSize(b) {
     if (!b) return '';
@@ -242,14 +307,17 @@
     members.forEach((m) => {
       const li = document.createElement('li');
       const dot = document.createElement('span');
-      dot.className = 'dot' + (m.file || (m.id === myId && hasSource) ? ' loaded' : '');
+      dot.className = 'dot ' + (m.status || 'nofile');
       const who = document.createElement('span');
       who.className = 'who';
       who.textContent = m.name + (m.id === myId ? ' (you)' : '');
       const file = document.createElement('span');
       file.className = 'file';
-      file.textContent = m.file ? `${m.file.name} ${fmtSize(m.file.size)}`.trim() : 'No file loaded';
-      li.append(dot, who, file);
+      file.textContent = m.file ? `${m.file.name} ${fmtSize(m.file.size)}`.trim() : (m.status === 'nofile' ? '' : 'Shared link');
+      const state = document.createElement('span');
+      state.className = 'state ' + (m.status || 'nofile');
+      state.textContent = STATE_TEXT[m.status] || '';
+      li.append(dot, who, state, file);
       el.members.append(li);
     });
 
@@ -267,6 +335,91 @@
     }
   }
 
+
+  // ------------------------------------------------------ start together
+  el.start.addEventListener('click', () => socket.emit('start'));
+
+  socket.on('countdown', ({ seconds, by }) => {
+    clearInterval(cdTimer);
+    let n = seconds;
+    counting = true;
+    el.countdown.hidden = false;
+    el.countdown.textContent = n;
+    updateStatus();
+    addSystem(`${by} started the countdown.`);
+    cdTimer = setInterval(() => {
+      n--;
+      if (n > 0) { el.countdown.textContent = n; return; }
+      clearInterval(cdTimer);
+      el.countdown.textContent = 'Go';
+      setTimeout(() => { el.countdown.hidden = true; counting = false; updateStatus(); }, 800);
+    }, 1000);
+  });
+
+  // ------------------------------------------------------------ fullscreen
+  function toggleFullscreen() {
+    if (document.fullscreenElement) { document.exitFullscreen(); return; }
+    const target = el.screen;
+    if (target.requestFullscreen) target.requestFullscreen().catch(() => {});
+    else if (target.webkitRequestFullscreen) target.webkitRequestFullscreen();
+    else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen(); // iPhone: video only
+  }
+  el.fsToggle.addEventListener('click', toggleFullscreen);
+  el.fsBtn.addEventListener('click', toggleFullscreen);
+
+  document.addEventListener('fullscreenchange', () => {
+    const fs = !!document.fullscreenElement;
+    el.fsBtn.textContent = fs ? 'Exit fullscreen' : 'Fullscreen';
+    if (!fs) { el.fsForm.hidden = true; el.fsFeed.innerHTML = ''; }
+  });
+
+  // Show the fullscreen button / status briefly when the mouse moves.
+  let activeTimer;
+  el.screen.addEventListener('mousemove', () => {
+    el.screen.classList.add('active');
+    clearTimeout(activeTimer);
+    activeTimer = setTimeout(() => el.screen.classList.remove('active'), 2500);
+  });
+
+  // Fullscreen chat: new messages float over the video; Enter opens a box.
+  function floatMessage(name, text, system) {
+    if (!document.fullscreenElement) return;
+    const li = document.createElement('li');
+    if (!system) {
+      const n = document.createElement('span');
+      n.className = 'name';
+      n.textContent = name;
+      li.append(n);
+    }
+    li.append(document.createTextNode(text));
+    el.fsFeed.append(li);
+    while (el.fsFeed.children.length > 5) el.fsFeed.firstChild.remove();
+    setTimeout(() => li.remove(), 9000);
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (el.room.hidden) return;
+    const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
+    if (e.key === 'Escape' && document.activeElement === el.fsInput) {
+      el.fsForm.hidden = true; el.fsInput.blur(); return;
+    }
+    if (typing) return;
+    if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
+    if (e.key === 'Enter' && document.fullscreenElement) {
+      e.preventDefault();
+      el.fsForm.hidden = false;
+      el.fsInput.focus();
+    }
+  });
+  el.fsForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = el.fsInput.value.trim();
+    if (text) socket.emit('chat', text);
+    el.fsInput.value = '';
+    el.fsForm.hidden = true;
+    el.fsInput.blur();
+  });
+
   // ------------------------------------------------------------------ chat
   function addMessage(node) {
     const stick = el.messages.scrollTop + el.messages.clientHeight >= el.messages.scrollHeight - 30;
@@ -278,6 +431,7 @@
     li.className = 'system';
     li.textContent = text;
     addMessage(li);
+    floatMessage('', text, true);
   }
   socket.on('system', addSystem);
   socket.on('chat', ({ id, name, text }) => {
@@ -288,6 +442,7 @@
     n.textContent = name;
     li.append(n, document.createTextNode(text));
     addMessage(li);
+    floatMessage(name, text, false);
   });
   el.chatForm.addEventListener('submit', (e) => {
     e.preventDefault();

@@ -45,8 +45,16 @@
         </div>
       </header>
 
+      <div class="status-row">
+        <p id="status" class="status warn" aria-live="polite"><span class="pulse"></span><span id="status-text">Connecting...</span></p>
+        <div class="status-actions">
+          <button id="start" class="primary" disabled title="Everyone gets a 3-2-1 countdown, then the movie starts for all of you at once">Start together</button>
+          <button id="fs-toggle" title="Fullscreen keeps chat on screen (press F)">Fullscreen</button>
+        </div>
+      </div>
+
       <div class="screen" id="screen">
-        <video id="video" controls playsinline preload="auto"></video>
+        <video id="video" controls controlslist="nofullscreen" playsinline preload="auto"></video>
 
         <div id="picker" class="picker">
           <p class="picker-title">Load the movie</p>
@@ -63,6 +71,14 @@
 
         <div id="wait-banner" class="banner" hidden></div>
         <button id="resume" class="resume" hidden>Click to join playback</button>
+
+        <p id="fs-status" class="status fs-status warn"><span class="pulse"></span><span id="fs-status-text"></span></p>
+        <button id="fs-btn" class="fs-btn" type="button">Exit fullscreen</button>
+        <div id="countdown" class="countdown" hidden></div>
+        <ol id="fs-feed" class="fs-feed" aria-hidden="true"></ol>
+        <form id="fs-form" class="fs-form" hidden>
+          <input id="fs-input" type="text" maxlength="500" placeholder="Message (Enter to send, Esc to close)" autocomplete="off" aria-label="Chat message">
+        </form>
       </div>
 
       <p id="mismatch" class="mismatch" hidden></p>
