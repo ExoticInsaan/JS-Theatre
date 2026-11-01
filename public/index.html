@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JS Theatre</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Lobby -->
+  <main id="lobby" class="lobby">
+    <div class="curtain" aria-hidden="true"></div>
+    <section class="ticket">
+      <h1>JS Theatre</h1>
+      <p class="tagline">Press play together. Everyone watches their own copy, so the picture stays full quality.</p>
+
+      <label for="name">Your name</label>
+      <input id="name" type="text" maxlength="24" placeholder="e.g. Asha" autocomplete="nickname">
+
+      <div class="lobby-actions">
+        <button id="create" class="primary">Create a room</button>
+      </div>
+
+      <div class="perforation" role="separator"><span>or join with a code</span></div>
+
+      <div class="join-row">
+        <input id="code" type="text" maxlength="8" placeholder="Room code" autocapitalize="characters" spellcheck="false" aria-label="Room code">
+        <button id="join">Join</button>
+      </div>
+      <p id="lobby-error" class="error" role="alert"></p>
+    </section>
+  </main>
+
+  <!-- Room -->
+  <div id="room" class="room" hidden>
+    <section class="stage">
+      <header class="stage-bar">
+        <div class="stage-title">
+          <strong id="room-code">-----</strong>
+          <span id="now-showing">Nothing loaded yet</span>
+        </div>
+        <div class="stage-tools">
+          <button id="copy-link">Copy invite link</button>
+        </div>
+      </header>
+
+      <div class="screen" id="screen">
+        <video id="video" controls playsinline preload="auto"></video>
+
+        <div id="picker" class="picker">
+          <p class="picker-title">Load the movie</p>
+          <p class="picker-hint">Both of you pick the same file from your own computer. Drop it here or choose it.</p>
+          <label class="file-btn primary">
+            Choose a video file
+            <input id="file" type="file" accept="video/*,.mkv" hidden>
+          </label>
+          <form id="url-form" class="url-form">
+            <input id="url" type="url" placeholder="Or paste a direct video link (.mp4, .webm)" aria-label="Direct video link">
+            <button type="submit">Share link</button>
+          </form>
+        </div>
+
+        <div id="wait-banner" class="banner" hidden></div>
+        <button id="resume" class="resume" hidden>Click to join playback</button>
+      </div>
+
+      <p id="mismatch" class="mismatch" hidden></p>
+    </section>
+
+    <aside class="side">
+      <section class="people">
+        <h2>In the room</h2>
+        <ul id="members"></ul>
+      </section>
+      <section class="chat">
+        <h2>Chat</h2>
+        <ol id="messages" aria-live="polite"></ol>
+        <form id="chat-form">
+          <input id="chat-input" type="text" maxlength="500" placeholder="Say something" autocomplete="off" aria-label="Chat message">
+          <button type="submit">Send</button>
+        </form>
+      </section>
+    </aside>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
